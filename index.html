@@ -236,6 +236,45 @@
     color: #fff;
   }
 
+  /* Mobile responsive */
+  @media (max-width: 540px) {
+    body {
+      padding: 8px;
+      overflow-x: hidden;
+    }
+    .axis-label {
+      font-size: 11px;
+    }
+    .axis-label-side {
+      font-size: 9px;
+      padding: 0 3px;
+      min-width: 20px;
+    }
+    .quadrant {
+      padding: 10px;
+      min-height: 160px;
+      gap: 8px;
+    }
+    .q-label {
+      font-size: 9px;
+    }
+    .todo-item {
+      gap: 5px;
+      padding: 5px 7px;
+    }
+    .checkbox {
+      width: 16px;
+      height: 16px;
+    }
+    .todo-text {
+      font-size: 12px;
+    }
+    .add-btn {
+      font-size: 10px;
+      padding: 5px 8px;
+    }
+  }
+
   /* Arrow indicators on axis */
   .arrow-top, .arrow-bottom, .arrow-left, .arrow-right {
     width: 0; height: 0;
