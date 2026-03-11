@@ -298,9 +298,32 @@
   .arrow.down { transform: rotate(45deg); }
   .arrow.left-arr { transform: rotate(135deg); }
   .arrow.right-arr { transform: rotate(-45deg); }
+
+  #status-toast {
+    position: fixed;
+    bottom: 20px;
+    right: 20px;
+    padding: 7px 14px;
+    border-radius: 8px;
+    font-size: 12px;
+    font-weight: 700;
+    font-family: 'Nunito', sans-serif;
+    color: #fff;
+    background: #333;
+    box-shadow: 0 4px 14px rgba(0,0,0,0.2);
+    opacity: 0;
+    transform: translateY(8px);
+    transition: opacity 0.2s, transform 0.2s;
+    pointer-events: none;
+    z-index: 9999;
+  }
+  #status-toast.show { opacity: 1; transform: translateY(0); }
+  #status-toast.ok  { background: #3a9e5f; }
+  #status-toast.err { background: #c0392b; }
 </style>
 </head>
 <body>
+<div id="status-toast"></div>
 
 <div class="wrapper">
 
@@ -357,77 +380,83 @@
 </div>
 
 <script>
-  const STORAGE_KEY = 'solveit-grid-v1';
-
-  const defaultData = {
-    red:    [{ id: 1, text: 'Example task', done: false }],
-    green:  [{ id: 1, text: 'Example task', done: false }],
-    yellow: [{ id: 1, text: 'Example task', done: false }],
-    blue:   [{ id: 1, text: 'Example task', done: false }],
+  const SUPABASE_URL = 'https://mcbobdzbijlulaptcbiv.supabase.co';
+  const SUPABASE_KEY = 'sb_publishable_8nDxCKIlulnfeW9nRAK8WQ_1XoiStpz';
+  const BASE_HEADERS = {
+    'apikey': SUPABASE_KEY,
+    'Authorization': 'Bearer ' + SUPABASE_KEY,
+    'Content-Type': 'application/json',
+    'Prefer': 'return=representation'
   };
 
-  let data = load();
+  let tasks = [];
+  let toastTimer = null;
 
-  function load() {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEY);
-      return saved ? JSON.parse(saved) : JSON.parse(JSON.stringify(defaultData));
-    } catch { return JSON.parse(JSON.stringify(defaultData)); }
+  function showStatus(msg, isError = false) {
+    const el = document.getElementById('status-toast');
+    el.textContent = msg;
+    el.className = 'show ' + (isError ? 'err' : 'ok');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => { el.className = ''; }, 2200);
   }
 
-  function save() {
-    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(data)); } catch {}
-  }
-
-  function render(q) {
-    const list = document.getElementById('list-' + q);
-    list.innerHTML = '';
-    data[q].forEach(item => {
-      const el = document.createElement('div');
-      el.className = 'todo-item' + (item.done ? ' done' : '');
-      el.innerHTML = `
-        <div class="checkbox" onclick="toggle('${q}', ${item.id})">
-          <svg class="checkbox-check" viewBox="0 0 10 10" fill="none">
-            <polyline points="1.5,5 4,7.5 8.5,2" stroke="rgba(0,0,0,0.6)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-          </svg>
-        </div>
-        <div class="todo-text" contenteditable="true" spellcheck="false"
-          onblur="updateText('${q}', ${item.id}, this.innerText)"
-          onkeydown="if(event.key==='Enter'){event.preventDefault();this.blur()}"
-        >${escapeHtml(item.text)}</div>
-        <button class="delete-btn" onclick="deleteItem('${q}', ${item.id})">×</button>
-      `;
-      list.appendChild(el);
+  async function sbFetch(path, options = {}) {
+    const res = await fetch(SUPABASE_URL + '/rest/v1/' + path, {
+      headers: BASE_HEADERS,
+      ...options
     });
+    return res;
   }
 
   function escapeHtml(str) {
     return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
   }
 
-  function toggle(q, id) {
-    const item = data[q].find(i => i.id === id);
-    if (item) { item.done = !item.done; save(); render(q); }
+  function render(q) {
+    const list = document.getElementById('list-' + q);
+    list.innerHTML = '';
+    tasks.filter(t => t.quadrant === q).forEach(task => {
+      const el = document.createElement('div');
+      el.className = 'todo-item' + (task.done ? ' done' : '');
+      el.innerHTML = `
+        <div class="checkbox" onclick="toggle(${task.id})">
+          <svg class="checkbox-check" viewBox="0 0 10 10" fill="none">
+            <polyline points="1.5,5 4,7.5 8.5,2" stroke="rgba(0,0,0,0.6)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </div>
+        <div class="todo-text" contenteditable="true" spellcheck="false"
+          onblur="updateText(${task.id}, this.innerText)"
+          onkeydown="if(event.key==='Enter'){event.preventDefault();this.blur()}"
+        >${escapeHtml(task.text)}</div>
+        <button class="delete-btn" onclick="deleteItem(${task.id}, '${q}')">×</button>
+      `;
+      list.appendChild(el);
+    });
   }
 
-  function updateText(q, id, text) {
-    const item = data[q].find(i => i.id === id);
-    if (item) { item.text = text.trim() || item.text; save(); }
+  async function loadAll() {
+    const res = await sbFetch('tasks?select=*&order=id.asc');
+    if (!res.ok) { showStatus('Failed to load tasks', true); return; }
+    tasks = await res.json();
+    ['red','green','yellow','blue'].forEach(q => render(q));
   }
 
-  function addItem(q) {
-    const maxId = data[q].reduce((m, i) => Math.max(m, i.id), 0);
-    data[q].push({ id: maxId + 1, text: 'New task', done: false });
-    save();
+  async function addItem(q) {
+    const res = await sbFetch('tasks', {
+      method: 'POST',
+      body: JSON.stringify({ quadrant: q, text: 'New task', done: false })
+    });
+    if (!res.ok) { showStatus('Failed to add task', true); return; }
+    const [task] = await res.json();
+    tasks.push(task);
     render(q);
-    // focus the new item
+    showStatus('Task added');
     const list = document.getElementById('list-' + q);
     const last = list.lastElementChild;
     if (last) {
       const editable = last.querySelector('.todo-text');
       if (editable) {
         editable.focus();
-        // select all text
         const range = document.createRange();
         range.selectNodeContents(editable);
         const sel = window.getSelection();
@@ -437,12 +466,44 @@
     }
   }
 
-  function deleteItem(q, id) {
-    data[q] = data[q].filter(i => i.id !== id);
-    save(); render(q);
+  async function toggle(id) {
+    const task = tasks.find(t => t.id === id);
+    if (!task) return;
+    const res = await sbFetch('tasks?id=eq.' + id, {
+      method: 'PATCH',
+      body: JSON.stringify({ done: !task.done })
+    });
+    if (!res.ok) { showStatus('Failed to update', true); return; }
+    const [updated] = await res.json();
+    Object.assign(task, updated);
+    render(task.quadrant);
+    showStatus(task.done ? 'Marked done' : 'Marked undone');
   }
 
-  ['red','green','yellow','blue'].forEach(q => render(q));
+  async function updateText(id, text) {
+    const task = tasks.find(t => t.id === id);
+    if (!task) return;
+    const trimmed = text.trim() || task.text;
+    if (trimmed === task.text) return;
+    const res = await sbFetch('tasks?id=eq.' + id, {
+      method: 'PATCH',
+      body: JSON.stringify({ text: trimmed })
+    });
+    if (!res.ok) { showStatus('Failed to save text', true); return; }
+    const [updated] = await res.json();
+    Object.assign(task, updated);
+    showStatus('Saved');
+  }
+
+  async function deleteItem(id, q) {
+    const res = await sbFetch('tasks?id=eq.' + id, { method: 'DELETE' });
+    if (!res.ok) { showStatus('Failed to delete', true); return; }
+    tasks = tasks.filter(t => t.id !== id);
+    render(q);
+    showStatus('Deleted');
+  }
+
+  loadAll();
 </script>
 </body>
 </html>
